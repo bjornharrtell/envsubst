@@ -26,28 +26,17 @@ fn main() {
         .read_to_string(&mut input)
         .expect("Failed to read from stdin");
 
-    // Determine which variables to substitute
-    let allowed_vars = if let Some(ref shell_format) = cli.shell_format {
-        let vars = extract_variables(shell_format);
-        Some(vars.into_iter().collect::<HashSet<String>>())
-    } else {
-        None
-    };
+    let allowed_vars = cli.shell_format
+        .as_ref()
+        .map(|sf| extract_variables(sf).into_iter().collect::<HashSet<String>>());
 
     if cli.variables {
-        // List all variables found in the shell format or input
-        let vars = if let Some(ref shell_format) = cli.shell_format {
-            extract_variables(shell_format)
-        } else {
-            extract_variables(&input)
-        };
-        for var in vars {
+        let source = cli.shell_format.as_ref().unwrap_or(&input);
+        for var in extract_variables(source) {
             println!("{}", var);
         }
     } else {
-        // Perform substitution
-        let result = substitute_variables(&input, allowed_vars.as_ref());
-        print!("{}", result);
+        print!("{}", substitute_variables(&input, allowed_vars.as_ref()));
         io::stdout().flush().unwrap();
     }
 }
@@ -99,11 +88,8 @@ fn extract_variables(input: &str) -> Vec<String> {
 /// Returns Some(value) if substitution should happen (value may be empty if var not found)
 /// Returns None if the variable should not be substituted (keep original)
 fn get_substitution_value(var_name: &str, allowed_vars: Option<&HashSet<String>>) -> Option<String> {
-    if should_substitute(var_name, allowed_vars) {
-        Some(env::var(var_name).unwrap_or_default())
-    } else {
-        None
-    }
+    let should_substitute = allowed_vars.map_or(true, |set| set.contains(var_name));
+    should_substitute.then(|| env::var(var_name).unwrap_or_default())
 }
 
 /// Reconstruct the original variable syntax
@@ -157,8 +143,7 @@ fn consume_until(chars: &mut std::iter::Peekable<std::str::Chars>, delimiter: ch
             chars.next(); // consume the delimiter
             break;
         }
-        result.push(ch);
-        chars.next();
+        result.push(chars.next().unwrap());
     }
     result
 }
@@ -170,18 +155,9 @@ fn consume_var_name(chars: &mut std::iter::Peekable<std::str::Chars>) -> String 
         if !is_var_char(ch) {
             break;
         }
-        result.push(ch);
-        chars.next();
+        result.push(chars.next().unwrap());
     }
     result
-}
-
-/// Check if a variable should be substituted based on the allowed list
-fn should_substitute(var_name: &str, allowed_vars: Option<&HashSet<String>>) -> bool {
-    match allowed_vars {
-        Some(set) => set.contains(var_name),
-        None => true,
-    }
 }
 
 #[cfg(test)]
