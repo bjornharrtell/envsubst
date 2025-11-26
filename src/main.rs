@@ -79,11 +79,13 @@ fn extract_variables(input: &str) -> Vec<String> {
     let mut chars = input.chars().peekable();
 
     while let Some(ch) = chars.next() {
-        if ch == '$' {
-            if let Some((var_name, _)) = parse_variable(&mut chars) {
-                if !var_name.is_empty() {
-                    vars.insert(var_name);
-                }
+        if ch != '$' {
+            continue;
+        }
+
+        if let Some((var_name, _)) = parse_variable(&mut chars) {
+            if !var_name.is_empty() {
+                vars.insert(var_name);
             }
         }
     }
@@ -119,18 +121,18 @@ fn substitute_variables(input: &str, allowed_vars: Option<&HashSet<String>>) -> 
     let mut chars = input.chars().peekable();
 
     while let Some(ch) = chars.next() {
-        if ch == '$' {
-            match parse_variable(&mut chars) {
-                Some((var_name, is_braced)) => {
-                    match get_substitution_value(&var_name, allowed_vars) {
-                        Some(value) => result.push_str(&value),
-                        None => result.push_str(&reconstruct_variable(&var_name, is_braced)),
-                    }
-                }
-                None => result.push(ch),
-            }
-        } else {
+        if ch != '$' {
             result.push(ch);
+            continue;
+        }
+
+        match parse_variable(&mut chars) {
+            Some((var_name, is_braced)) => {
+                let replacement = get_substitution_value(&var_name, allowed_vars)
+                    .unwrap_or_else(|| reconstruct_variable(&var_name, is_braced));
+                result.push_str(&replacement);
+            }
+            None => result.push(ch),
         }
     }
 
