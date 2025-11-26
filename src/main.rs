@@ -52,6 +52,27 @@ fn main() {
     }
 }
 
+/// Parse a variable reference starting after the '$' character
+/// Returns (variable_name, is_braced) where is_braced indicates ${VAR} syntax
+fn parse_variable(chars: &mut std::iter::Peekable<std::str::Chars>) -> Option<(String, bool)> {
+    match chars.peek().copied()? {
+        '{' => {
+            chars.next(); // consume '{'
+            let var_name = consume_until(chars, '}');
+            Some((var_name, true))
+        }
+        ch if is_var_start(ch) => {
+            let var_name = consume_var_name(chars);
+            if !var_name.is_empty() {
+                Some((var_name, false))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Extract all variable names from the input string
 fn extract_variables(input: &str) -> Vec<String> {
     let mut vars = HashSet::new();
@@ -59,20 +80,9 @@ fn extract_variables(input: &str) -> Vec<String> {
 
     while let Some(ch) = chars.next() {
         if ch == '$' {
-            if let Some(&next_ch) = chars.peek() {
-                if next_ch == '{' {
-                    // ${VAR} syntax
-                    chars.next(); // consume '{'
-                    let var_name = consume_until(&mut chars, '}');
-                    if !var_name.is_empty() {
-                        vars.insert(var_name);
-                    }
-                } else if is_var_start(next_ch) {
-                    // $VAR syntax
-                    let var_name = consume_var_name(&mut chars);
-                    if !var_name.is_empty() {
-                        vars.insert(var_name);
-                    }
+            if let Some((var_name, _)) = parse_variable(&mut chars) {
+                if !var_name.is_empty() {
+                    vars.insert(var_name);
                 }
             }
         }
@@ -83,6 +93,26 @@ fn extract_variables(input: &str) -> Vec<String> {
     result
 }
 
+/// Get the value to substitute for a variable name
+/// Returns Some(value) if substitution should happen (value may be empty if var not found)
+/// Returns None if the variable should not be substituted (keep original)
+fn get_substitution_value(var_name: &str, allowed_vars: Option<&HashSet<String>>) -> Option<String> {
+    if should_substitute(var_name, allowed_vars) {
+        Some(env::var(var_name).unwrap_or_default())
+    } else {
+        None
+    }
+}
+
+/// Reconstruct the original variable syntax
+fn reconstruct_variable(var_name: &str, is_braced: bool) -> String {
+    if is_braced {
+        format!("${{{}}}", var_name)
+    } else {
+        format!("${}", var_name)
+    }
+}
+
 /// Substitute environment variables in the input string
 fn substitute_variables(input: &str, allowed_vars: Option<&HashSet<String>>) -> String {
     let mut result = String::new();
@@ -90,44 +120,14 @@ fn substitute_variables(input: &str, allowed_vars: Option<&HashSet<String>>) -> 
 
     while let Some(ch) = chars.next() {
         if ch == '$' {
-            if let Some(&next_ch) = chars.peek() {
-                if next_ch == '{' {
-                    // ${VAR} syntax
-                    chars.next(); // consume '{'
-                    let var_name = consume_until(&mut chars, '}');
-                    
-                    if should_substitute(&var_name, allowed_vars) {
-                        if let Ok(value) = env::var(&var_name) {
-                            result.push_str(&value);
-                        }
-                        // If variable doesn't exist, replace with empty string
-                    } else {
-                        // Not in allowed list, keep original
-                        result.push_str("${");
-                        result.push_str(&var_name);
-                        result.push('}');
+            match parse_variable(&mut chars) {
+                Some((var_name, is_braced)) => {
+                    match get_substitution_value(&var_name, allowed_vars) {
+                        Some(value) => result.push_str(&value),
+                        None => result.push_str(&reconstruct_variable(&var_name, is_braced)),
                     }
-                } else if is_var_start(next_ch) {
-                    // $VAR syntax
-                    let var_name = consume_var_name(&mut chars);
-                    
-                    if should_substitute(&var_name, allowed_vars) {
-                        if let Ok(value) = env::var(&var_name) {
-                            result.push_str(&value);
-                        }
-                        // If variable doesn't exist, replace with empty string
-                    } else {
-                        // Not in allowed list, keep original
-                        result.push('$');
-                        result.push_str(&var_name);
-                    }
-                } else {
-                    // Just a lone $
-                    result.push(ch);
                 }
-            } else {
-                // $ at end of string
-                result.push(ch);
+                None => result.push(ch),
             }
         } else {
             result.push(ch);
